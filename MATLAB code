@@ -1,0 +1,171 @@
+%% Housekeeping
+% Include necessary libraries and clear workspace
+addpath('ximu_matlab_library');
+addpath('quaternion_library');
+close all;
+clear;
+clc;
+ 
+%% Import data
+% Load data from xIMU device
+xIMUdata = xIMUdataClass('LoggedData/LoggedData');
+
+samplePeriod = 1/256;
+
+% Extract gyroscope and accelerometer data
+gyr = [xIMUdata.CalInertialAndMagneticData.Gyroscope.X...
+       xIMUdata.CalInertialAndMagneticData.Gyroscope.Y...
+       xIMUdata.CalInertialAndMagneticData.Gyroscope.Z];       
+acc = [xIMUdata.CalInertialAndMagneticData.Accelerometer.X...
+       xIMUdata.CalInertialAndMagneticData.Accelerometer.Y...
+       xIMUdata.CalInertialAndMagneticData.Accelerometer.Z];	
+
+%% Plot data
+% Gyroscope plot
+figure('Name', 'Gyroscope');
+hold on;
+plot(gyr(:,1), 'r');
+plot(gyr(:,2), 'g');
+plot(gyr(:,3), 'b');
+xlabel('Sample');
+ylabel('Degrees per second');
+title('Gyroscope');
+legend('X', 'Y', 'Z');
+
+% Accelerometer plot
+figure('Name', 'Accelerometer');
+hold on;
+plot(acc(:,1), 'r');
+plot(acc(:,2), 'g');
+plot(acc(:,3), 'b');
+xlabel('Sample');
+ylabel('g');
+title('Accelerometer');
+legend('X', 'Y', 'Z');
+
+%% Process data through AHRS algorithm to calculate orientation
+% Update orientation using Mahony AHRS algorithm
+R = zeros(3,3,length(gyr));
+ahrs = MahonyAHRS('SamplePeriod', samplePeriod, 'Kp', 1);
+
+for i = 1:length(gyr)
+    ahrs.UpdateIMU(gyr(i,:) * (pi/180), acc(i,:));
+    R(:,:,i) = quatern2rotMat(ahrs.Quaternion)';
+end
+
+%% Calculate 'tilt-compensated' accelerometer
+tcAcc = zeros(size(acc));
+
+for i = 1:length(acc)
+    tcAcc(i,:) = R(:,:,i) * acc(i,:)';
+end
+
+% Plot 'tilt-compensated' accelerometer
+figure('Name', '''Tilt-Compensated'' accelerometer');
+hold on;
+plot(tcAcc(:,1), 'r');
+plot(tcAcc(:,2), 'g');
+plot(tcAcc(:,3), 'b');
+xlabel('Sample');
+ylabel('g');
+title('''Tilt-compensated'' accelerometer');
+legend('X', 'Y', 'Z');
+
+%% Calculate linear acceleration in Earth frame (subtracting gravity)
+linAcc = tcAcc - [zeros(length(tcAcc), 1), zeros(length(tcAcc), 1), ones(length(tcAcc), 1)];
+linAcc = linAcc * 9.81;
+
+% Plot linear acceleration
+figure('Name', 'Linear Acceleration');
+hold on;
+plot(linAcc(:,1), 'r');
+plot(linAcc(:,2), 'g');
+plot(linAcc(:,3), 'b');
+xlabel('Sample');
+ylabel('m/s^2');
+title('Linear Acceleration');
+legend('X', 'Y', 'Z');
+
+%% Calculate linear velocity by integrating acceleration
+linVel = zeros(size(linAcc));
+
+for i = 2:length(linAcc)
+    linVel(i,:) = linVel(i-1,:) + linAcc(i,:) * samplePeriod;
+end
+
+% Plot linear velocity
+figure('Name', 'Linear Velocity');
+hold on;
+plot(linVel(:,1), 'r');
+plot(linVel(:,2), 'g');
+plot(linVel(:,3), 'b');
+xlabel('Sample');
+ylabel('m/s');
+title('Linear Velocity');
+legend('X', 'Y', 'Z');
+
+%% High-pass filter linear velocity to remove drift
+order = 1;
+filtCutOff = 0.1;
+[b, a] = butter(order, (2*filtCutOff)/(1/samplePeriod), 'high');
+linVelHP = filtfilt(b, a, linVel);
+
+% Plot high-pass filtered linear velocity
+figure('Name', 'High-pass filtered Linear Velocity');
+hold on;
+plot(linVelHP(:,1), 'r');
+plot(linVelHP(:,2), 'g');
+plot(linVelHP(:,3), 'b');
+xlabel('Sample');
+ylabel('m/s');
+title('High-pass filtered Linear Velocity');
+legend('X', 'Y', 'Z');
+
+%% Calculate linear position by integrating velocity
+linPos = zeros(size(linVelHP));
+
+for i = 2:length(linVelHP)
+    linPos(i,:) = linPos(i-1,:) + linVelHP(i,:) * samplePeriod;
+end
+
+% Plot linear position
+figure('Name', 'Linear Position');
+hold on;
+plot(linPos(:,1), 'r');
+plot(linPos(:,2), 'g');
+plot(linPos(:,3), 'b');
+xlabel('Sample');
+ylabel('m');
+title('Linear Position');
+legend('X', 'Y', 'Z');
+
+%% High-pass filter linear position to remove drift
+order = 1;
+filtCutOff = 0.1;
+[b, a] = butter(order, (2*filtCutOff)/(1/samplePeriod), 'high');
+linPosHP = filtfilt
+
+(b, a, linPos);
+
+% Plot high-pass filtered linear position
+figure('Name', 'High-pass filtered Linear Position');
+hold on;
+plot(linPosHP(:,1), 'r');
+plot(linPosHP(:,2), 'g');
+plot(linPosHP(:,3), 'b');
+xlabel('Sample');
+ylabel('m');
+title('High-pass filtered Linear Position');
+legend('X', 'Y', 'Z');
+
+%% Play animation
+SamplePlotFreq = 8;
+
+SixDOFanimation(linPosHP, R, ...
+                'SamplePlotFreq', SamplePlotFreq, 'Trail', 'Off', ...
+                'Position', [9 39 1280 720], ...
+                'AxisLength', 0.1, 'ShowArrowHead', false, ...
+                'Xlabel', 'X (m)', 'Ylabel', 'Y (m)', 'Zlabel', 'Z (m)', 'ShowLegend', false, 'Title', 'Unfiltered',...
+                'CreateAVI', false, 'AVIfileNameEnum', false, 'AVIfps', ((1/samplePeriod) / SamplePlotFreq));            
+ 
+%% End of script
