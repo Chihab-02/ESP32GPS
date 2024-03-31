@@ -1,0 +1,14 @@
+% Create serial port object
+s = serial('COM3', 'BaudRate', 9600); % Replace 'COM3' with the correct port for your Arduino
+
+% Open the serial port
+fopen(s);
+
+% Read and display data
+while true
+    data = fscanf(s, '%d'); % Read integer data
+    disp(data); % Display data in MATLAB Command Window
+end
+
+% Close the serial port when done
+fclose(s);
